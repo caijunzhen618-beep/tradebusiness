@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Environment Check</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .info {
+            background: #252526;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 3px solid #007acc;
+        }
+        .error {
+            background: #252526;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 3px solid #f44336;
+        }
+        .success {
+            background: #252526;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 3px solid #4caf50;
+        }
+        h2 { color: #007acc; }
+    </style>
+</head>
+<body>
+    <h1>🔍 前端环境检查</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        const results = document.getElementById('results');
+
+        function addInfo(title, content) {
+            results.innerHTML += `<div class="info"><strong>${title}</strong><br>${content}</div>`;
+        }
+
+        function addSuccess(title, content) {
+            results.innerHTML += `<div class="success"><strong>✅ ${title}</strong><br>${content}</div>`;
+        }
+
+        function addError(title, content) {
+            results.innerHTML += `<div class="error"><strong>❌ ${title}</strong><br>${content}</div>`;
+        }
+
+        // 检查环境变量
+        const baseURL = import.meta.env.VITE_APP_BASE_API;
+        const wsURL = import.meta.env.VITE_APP_WS_URL;
+        const appTitle = import.meta.env.VITE_APP_TITLE;
+
+        addInfo('VITE_APP_BASE_API', baseURL || '未设置');
+        addInfo('VITE_APP_WS_URL', wsURL || '未设置');
+        addInfo('VITE_APP_TITLE', appTitle || '未设置');
+        addInfo('MODE', import.meta.env.MODE);
+        addInfo('DEV', import.meta.env.DEV);
+        addInfo('PROD', import.meta.env.PROD);
+        addInfo('BASE_URL', import.meta.env.BASE_URL);
+        addInfo('当前页面 URL', window.location.href);
+
+        // 检查配置是否正确
+        if (!baseURL) {
+            addError('配置错误', 'VITE_APP_BASE_API 未设置！');
+        } else if (baseURL !== 'http://localhost:8000') {
+            addError('配置错误', `VITE_APP_BASE_API 设置为: ${baseURL}<br>应该是: http://localhost:8000`);
+        } else {
+            addSuccess('配置正确', 'VITE_APP_BASE_API = http://localhost:8000');
+        }
+
+        // 计算完整的 API URL
+        const loginURL = `${baseURL}/api/v1/auth/login`;
+        addInfo('完整登录 URL', loginURL);
+
+        // 检查 URL 是否正确
+        if (loginURL !== 'http://localhost:8000/api/v1/auth/login') {
+            addError('URL 错误', `登录 URL 不正确<br>实际: ${loginURL}<br>期望: http://localhost:8000/api/v1/auth/login`);
+        } else {
+            addSuccess('URL 正确', '登录 API URL 格式正确');
+        }
+
+        // 测试连接
+        addInfo('开始测试连接...', '请稍候...');
+        fetch(baseURL + '/health')
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                }
+                throw new Error(`Status: ${response.status}`);
+            })
+            .then(data => {
+                addSuccess('后端连接成功', `可以访问后端！<br><pre>${JSON.stringify(data, null, 2)}</pre>`);
+            })
+            .catch(error => {
+                addError('后端连接失败', `错误: ${error.message}<br>请检查:<br>1. 后端是否在运行<br>2. 浏览器控制台是否有 CORS 错误<br>3. VITE_APP_BASE_API 是否正确`);
+            });
+    </script>
+</body>
+</html>

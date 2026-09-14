@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # MySQL 8.0 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: tradebusiness-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: tradebusiness
+      MYSQL_USER: tradebusiness
+      MYSQL_PASSWORD: tradebusiness
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: tradebusiness-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端 API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradebusiness-backend
+    environment:
+      - DATABASE_URL=mysql+aiomysql://tradebusiness:tradebusiness@mysql:3306/tradebusiness?charset=utf8mb4
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - JWT_SECRET_KEY=your-jwt-secret-key-change-this-in-production
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM}
+      - AI_PROVIDER=${AI_PROVIDER:-rules}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
+      - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-45}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+      - AI_RETRY_BACKOFF_SECONDS=${AI_RETRY_BACKOFF_SECONDS:-0.5}
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradebusiness-celery-worker
+    environment:
+      - DATABASE_URL=mysql+aiomysql://tradebusiness:tradebusiness@mysql:3306/tradebusiness?charset=utf8mb4
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis:6379/3
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM}
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    command: celery -A app.tasks.automation_tasks:celery_app worker --loglevel=info
+
+  # Celery Beat (定时任务)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradebusiness-celery-beat
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis:6379/3
+    depends_on:
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    command: celery -A app.tasks.automation_tasks:celery_app beat --loglevel=info
+
+volumes:
+  mysql_data:
+  redis_data:
