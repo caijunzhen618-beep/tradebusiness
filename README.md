@@ -1,5 +1,16 @@
 # 货运代理业务管理系统
 
+## V1 产品与技术资料
+
+- [V1 可交互 HTML 产品原型](docs/prototype/v1/index.html)
+- [V1 已确认需求总览](docs/requirements/v1/index.html)
+- [V1 技术方案](docs/architecture/V1-TECHNICAL-DESIGN.md)
+- [V0 → V1 复用评估](docs/architecture/V0-TO-V1-REUSE-ASSESSMENT.md)
+- [核心重写 vs 基于 V0 改造决策](docs/architecture/REWRITE-VS-REFACTOR-DECISION.md)
+- [V1 开发实施计划](docs/architecture/V1-IMPLEMENTATION-PLAN.md)
+
+> 技术方案确认前不启动正式 V1 业务代码开发；V0 代码与数据保持不变。
+
 [![项目状态](https://img.shields.io/badge/状态-✅_100%_完成-success)](./COMPLETION_REPORT.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green)](#)
 [![Vue 3](https://img.shields.io/badge/Vue-3.3-brightgreen)](#)
