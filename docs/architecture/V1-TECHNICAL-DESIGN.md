@@ -86,7 +86,8 @@ V1 先使用模块化单体，而非微服务。原因是当前团队需要快�
 | `contact_activities` | 企业、产品、角色、联系人/点位、channel、result、note、occurred_at、next_follow_up_at、created_by | 联系结果事实源 |
 | `acquisition_runs` | product、role、requested_gap、status、stage、stop_reason、统计、幂等键 | 一次补客工作流 |
 | `acquisition_batches` | run、provider、capability、cursor、状态、输入/输出计数、错误 | 可恢复批次 |
-| `provider_records` | provider、external_id、source_url、payload_hash、raw_payload、fetched_at；unique(provider, external_id/payload_hash) | 来源追踪与幂等 |
+| `discovery_records` | run、batch、product、role、provider、source_type、query_text/group、city、rank、source_url、referrer_id、prospect_id?、resolution_status/reason、discovered_at | 企业发现与官网定位链路；去重后仍保留 |
+| `provider_records` | provider、external_id、source_url、payload_hash、raw_payload/retained_metadata、fetched_at；unique(provider, external_id/payload_hash) | 原始供应商记录、幂等与审计，不替代发现链路 |
 
 ### 4.1 核心对象关系
 
@@ -96,7 +97,8 @@ LogisticsProduct ──< ProductInventoryTarget
        ├──< ProductMatch >── Prospect ──< ProspectRole
        └──< ProductProspect >──┤       ├──< Contact ──< ContactPoint
                                │       └──< Evidence
-                               └──< ContactActivity
+                               ├──< ContactActivity
+                               └──< DiscoveryRecord >── AcquisitionRun
 ```
 
 ### 4.2 库存计算
@@ -144,13 +146,19 @@ SearchQuery
 DiscoveryHit
 - query_id / provider / title / snippet / url / rank
 
+DiscoveryRecord
+- run_id / batch_id / product_id / customer_type
+- provider / source_type / query_text / query_group / city / rank
+- source_url / referrer_record_id / discovered_at
+- prospect_id? / resolution_status / rejection_reason?
+
 CompanySeed
 - candidate_name / website / source_url
 - possible_role / location
 - raw_evidence[]
 ```
 
-`DiscoveryHit` 是网页结果，不是潜客。只有经过企业识别后才生成/合并 Prospect；只有满足角色准入并获得有效 ContactPoint 后才进入可用产品池。
+`DiscoveryHit` 是 Provider 适配器的瞬时结果，不是潜客；接收后立即幂等落为 `DiscoveryRecord`。只有经过企业识别后才生成/合并 Prospect；只有满足角色准入并获得有效 ContactPoint 后才进入可用产品池。
 
 ### 6.2 总体补客算法
 
@@ -370,6 +378,17 @@ plan_acquisition
 
 Celery 每阶段接收 ID 列表而非整份网页正文。业务权威状态保存在 MySQL；Redis 只用于队列、限流和短期锁。任务至少一次投递下必须幂等，按 `provider + external_id/source_url + payload_hash` 防止重复处理。
 
+### 6.10 来源链路持久化与官网确认
+
+Provider 返回 `DiscoveryHit` 后，系统先写 `ProviderRecord` 和首个 `DiscoveryRecord`，再做页面分类与实体解析。发现页指向目录详情、目录详情再指向官网时，每次跳转新增记录并通过 `referrer_record_id` 相连。最终由域名、企业名称、地址、电话等确定性信号确认官网归属，并把整条链路关联到规范 Prospect。
+
+`resolution_status` 状态转换为：`unresolved → resolved | merged | rejected`。合并企业只更新规范 `prospect_id`/`merged_to_prospect_id`，不删除旧记录；失败结果记录原因与内容哈希，后续同一 Query/URL 可跳过重复解析。`Evidence` 和 `ContactPoint` 通过各自的 `source_url` 或可选 `discovery_record_id` 回指发现节点，但仍按各自事实语义独立存储。
+
+来源链路产生两类查询投影：
+
+- 企业溯源：按时间展示首次/历次来源、Query、落地页、官网确认路径及所属产品任务；
+- 渠道漏斗：按 Query 组、城市、Provider、source type 统计 hit、resolved、merged、qualified、contactable、admitted。
+
 ## 7. 数据质量与实体解析
 
 ### 7.1 联系方式
@@ -399,9 +418,11 @@ Celery 每阶段接收 ID 列表而非整份网页正文。业务权威状态保
 | GET | `/logistics-products/{id}/prospects?customer_type=&state=` | 产品潜客列表及推荐理由 |
 | POST | `/logistics-products/{id}/replenishments` | 幂等启动补客 |
 | GET | `/acquisition-runs/{id}` | 阶段、批次、漏斗、停止原因 |
+| GET | `/acquisition-runs/{id}/funnel?group_by=` | 按 Query/城市/Provider/来源下钻发现漏斗 |
 | POST | `/acquisition-runs/{id}/cancel` | 安全取消未完成批次 |
 | GET | `/prospects` | 企业库搜索 |
 | GET | `/prospects/{id}` | 主档、角色、Evidence、联系人、匹配产品 |
+| GET | `/prospects/{id}/discovery-records` | 首次及历次发现、官网定位和合并链路 |
 | POST | `/contact-activities` | 记录 6 类结果与跟进 |
 | GET | `/prospects/{id}/activities?product_id=&customer_type=` | 产品语境联系历史 |
 | POST | `/outreach/emails` | 向指定 ContactPoint 发邮件并关联语境 |
@@ -421,10 +442,10 @@ Celery 每阶段接收 ID 列表而非整份网页正文。业务权威状态保
 ## 10. 测试与验收门槛
 
 - 单元：准入、排序理由、库存口径、6 类结果副作用、拒绝范围、联系方式校验、幂等 upsert。
-- 集成：Provider contract、实体合并、全流水线断点重试、邮件与 ContactActivity 关联。
+- 集成：Provider contract、发现链路落库、实体合并后来源保留、全流水线断点重试、邮件与 ContactActivity 关联。
 - 端到端：创建产品→设定双角色库存→补客→列表/详情→电话/邮件→6 类结果→跟进。
 - 必测复用：韩国发现企业同时写入 KR/VE Evidence；韩国产品可入池；委内瑞拉只生成新候选；下次补充时优先消费；不重复抓取、不复制 Prospect。
-- 发现验收使用固定样本集和小批真实搜索，分别核对企业真实性、角色准入、Evidence 来源、联系方式有效率和跨产品复用结果。
+- 发现验收使用固定样本集和小批真实搜索，分别核对企业真实性、官网确认路径、角色准入、Evidence 来源、联系方式有效率和跨产品复用结果。
 
 ## 11. 待技术评审决策点
 

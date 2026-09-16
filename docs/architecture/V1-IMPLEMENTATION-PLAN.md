@@ -7,7 +7,7 @@
 | 阶段 | 目标 | 主要产物 | 退出标准 |
 | --- | --- | --- | --- |
 | M0 发现方案验证（3～5 人日） | 验证潜客能否真实找到 | ADR、搜索词样本、Provider spike、同行/货主数据漏斗 | 每类至少跑通一批真实候选并得到可用潜客 |
-| M1 核心事实库（6～9 人日） | 建立正确的数据所有权 | Product、Prospect、Role、Contact、ContactPoint、Evidence | 唯一约束、来源、基础校验、实体合并测试通过 |
+| M1 核心事实库（6～9 人日） | 建立正确的数据所有权 | Product、Prospect、Role、Contact、ContactPoint、Evidence、DiscoveryRecord | 唯一约束、来源链路、基础校验、实体合并测试通过 |
 | M2 产品池与匹配（6～8 人日） | 跑通企业复用和库存 | ProductMatch、ProductProspect、双角色库存、推荐理由 | VE/KR 复用验收通过，库存口径一致 |
 | M3 补客流水线（8～12 人日） | 企业库优先、外部增量 | Provider contract、AcquisitionRun/Batch、Celery 编排、漏斗 | 幂等、重试、限流、停止条件和任务进度通过 |
 | M4 触达闭环（5～7 人日） | 业务员可连续开发 | 列表/详情、复制、邮件、6 类结果、跟进、两级拒绝 | 所有结果副作用与产品语境测试通过 |
@@ -43,6 +43,7 @@ M0 契约/验证
 - 建表与数据库版本脚本；Repository/Service/API。
 - 国家字典与物流产品表单（只含已确认字段）。
 - Prospect 多角色、Contact/ContactPoint、Evidence CRUD/查询。
+- DiscoveryRecord、ProviderRecord 与来源链路查询；官网确认过程可回溯。
 - 联系方式标准化和基础质量校验。
 - 企业 identity、确定性合并、模糊候选与 merge log。
 - 企业库搜索和企业详情页。
@@ -67,6 +68,7 @@ M0 契约/验证
 - 批量实体解析、Qualification、完整富化、联系方式补全、验证、全局 upsert、全产品重算、当前池入池。
 - 用最近产出率估算候选预算；实现按批执行、连续空批/查询耗尽/成本上限/库存达标等停止条件。
 - 进度查询、停止原因、每个 Query/Provider 漏斗与错误诊断。
+- 按 Query 组、城市、Provider、来源类型下钻 hit→解析→合并→准入→可触达→入池漏斗。
 
 ### M4：触达与跟进
 
@@ -91,7 +93,7 @@ M0 契约/验证
 | --- | --- |
 | 单元 | 角色准入、Evidence 新鲜度、推荐解释、库存、6 结果、副作用、DNC、标准化 |
 | Contract | 每个 Provider 的输入/输出/错误/限流；API schema 向后兼容 |
-| 集成 | 幂等 upsert、实体合并、任务重试、邮件活动关联、跨产品重算 |
+| 集成 | 幂等 upsert、实体合并后来源链路保留、任务重试、邮件活动关联、跨产品重算 |
 | E2E | 创建产品、双角色库存、补充、列表、详情、触达、跟进、复用 |
 | 发现质量 | Query 样本、企业真实性抽检、Evidence 来源、联系方式有效率、单客成本 |
 | 性能 | 10 万/100 万 Prospect 量级的列表、匹配重算、批量入池和索引计划 |
@@ -100,6 +102,7 @@ M0 契约/验证
 
 - 任何可用潜客必须有角色准入证据与至少一个通过基础校验的 ContactPoint。
 - 推荐理由可追到 Evidence/source_url；不返回孤立 match score。
+- 任一 Prospect 可反查发现 Query、渠道、落地页与官网确认路径；合并不丢链路。
 - 重放同一 Provider 批次不产生重复企业、联系方式、Evidence 或入池关系。
 - 调低库存不删除任何企业、关系和历史。
 - 产品已满时新增优质候选只留在 ProductMatch；不会偷偷替换工作集。
