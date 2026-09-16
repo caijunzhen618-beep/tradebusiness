@@ -7,7 +7,7 @@
 | 阶段 | 目标 | 主要产物 | 退出标准 |
 | --- | --- | --- | --- |
 | M0 发现方案验证（3～5 人日） | 验证潜客能否真实找到 | ADR、搜索词样本、Provider spike、同行/货主数据漏斗 | 每类至少跑通一批真实候选并得到可用潜客 |
-| M1 核心事实库（6～9 人日） | 建立正确的数据所有权 | Product、Prospect、Role、Contact、ContactPoint、Evidence、DiscoveryRecord | 唯一约束、来源链路、基础校验、实体合并测试通过 |
+| M1 核心事实库（6～9 人日） | 建立正确的数据所有权 | Product、Prospect、ContactPoint、Evidence、DiscoveryRecord、展会三层模型 | 唯一约束、来源链路、基础校验、实体合并测试通过 |
 | M2 产品池与匹配（6～8 人日） | 跑通企业复用和库存 | ProductMatch、ProductProspect、双角色库存、推荐理由 | VE/KR 复用验收通过，库存口径一致 |
 | M3 补客流水线（8～12 人日） | 企业库优先、外部增量 | Provider contract、AcquisitionRun/Batch、Celery 编排、漏斗 | 幂等、重试、限流、停止条件和任务进度通过 |
 | M4 触达闭环（5～7 人日） | 业务员可连续开发 | 列表/详情、复制、邮件、6 类结果、跟进、两级拒绝 | 所有结果副作用与产品语境测试通过 |
@@ -35,6 +35,7 @@ M0 契约/验证
 - 将本文 API 表扩为 OpenAPI 契约；确认分页、错误码、幂等键。
 - 先以委内瑞拉海运和韩国海运生成同行/出口货主 SearchPlan，人工评审 Query 是否符合已确认规则。
 - 用至少 1 个 Web Search、1 个官网 Enrichment、1 个 B2B/展会来源做小样本 spike，分别记录发现→去重→准入→联系方式→可用潜客漏斗。
+- 从官方/行业展会汇编建立首批候选，筛选 3～5 个有明确参展商入口的出口型展会；每个抽取 100～300 条验证数据形态、条款和产出率。
 - 验证城市展开、目的国/区域同义词、排除词、官网高价值页面和联系方式提取策略。
 - 评审并冻结 ERD、Search Strategy v1、匹配规则版本、run 状态机、批次规模与停止条件。
 
@@ -44,6 +45,7 @@ M0 契约/验证
 - 国家字典与物流产品表单（只含已确认字段）。
 - Prospect 多角色、Contact/ContactPoint、Evidence CRUD/查询。
 - DiscoveryRecord、ProviderRecord 与来源链路查询；官网确认过程可回溯。
+- TradeShow、TradeShowEdition、ExhibitorRecord 建表与后台维护接口。
 - 联系方式标准化和基础质量校验。
 - 企业 identity、确定性合并、模糊候选与 merge log。
 - 企业库搜索和企业详情页。
@@ -64,6 +66,7 @@ M0 契约/验证
 - Query Generator：国家/区域/运输方式同义词、城市展开、基础同行词、产品相关词、来源限定、排除词。
 - 同行发现：基础覆盖 Query + 产品相关 Query；企业国际货运资格识别；庄家信号只降序。
 - 出口货主发现：B2B 中国供应商 + 出口展会 + 官网公开网络；出口证据准入与目的国排序分离。
+- 展会同步：首版目录后台配置、届次版本判断、参展商幂等增量同步、断点续跑；产品补客不重抓旧届。
 - Website Enrichment：主页、Contact、About、Products、Market/Global/Export、Team 的限量抓取与 Evidence/Contact 提取。
 - 批量实体解析、Qualification、完整富化、联系方式补全、验证、全局 upsert、全产品重算、当前池入池。
 - 用最近产出率估算候选预算；实现按批执行、连续空批/查询耗尽/成本上限/库存达标等停止条件。

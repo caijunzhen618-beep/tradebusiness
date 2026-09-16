@@ -86,6 +86,9 @@ V1 先使用模块化单体，而非微服务。原因是当前团队需要快�
 | `contact_activities` | 企业、产品、角色、联系人/点位、channel、result、note、occurred_at、next_follow_up_at、created_by | 联系结果事实源 |
 | `acquisition_runs` | product、role、requested_gap、status、stage、stop_reason、统计、幂等键 | 一次补客工作流 |
 | `acquisition_batches` | run、provider、capability、cursor、状态、输入/输出计数、错误 | 可恢复批次 |
+| `trade_shows` | 中英文名/别名、官网、主办方、行业/品类、城市、出口属性来源、目录配置、合规策略、status、reviewed_at | 系统级展会目录 |
+| `trade_show_editions` | trade_show、edition/year/season、日期、directory_url、published_at、source_version、sync_status/cursor、last_synced_at；unique(show, edition) | 可增量同步的具体届次 |
+| `exhibitor_records` | edition、provider、external_id?、company_name、booth、category、website?、source_url、payload_hash、prospect_id?、resolution_status；届次内幂等约束 | 届次参展企业原始记录 |
 | `discovery_records` | run、batch、product、role、provider、source_type、query_text/group、city、rank、source_url、referrer_id、prospect_id?、resolution_status/reason、discovered_at | 企业发现与官网定位链路；去重后仍保留 |
 | `provider_records` | provider、external_id、source_url、payload_hash、raw_payload/retained_metadata、fetched_at；unique(provider, external_id/payload_hash) | 原始供应商记录、幂等与审计，不替代发现链路 |
 
@@ -254,6 +257,23 @@ Korea freight forwarder China
 
 具体网站名称和采购方式在 Provider 技术验证时选择，但输入、输出和漏斗口径保持一致，避免供应商更换导致业务层重写。
 
+#### A.1 展会目录与届次执行模型
+
+展会不是每个 SearchPlan 临时搜索出来的 Query 结果，而是系统级来源配置：
+
+```text
+TradeShow（长期主档）
+  └── TradeShowEdition（某一届）
+        └── ExhibitorRecord（该届参展记录）
+              └── entity resolution → Prospect
+```
+
+管理员按季度复核展会目录；调度器按 `published_at/source_version/sync_status` 判断是否同步新届次。创建产品只查询已解析 Prospect/ProductMatch。只有新届次、目录版本变化、失败续跑或管理员手动触发时，才运行 `sync_exhibition_edition`。
+
+参展商幂等键优先 `(edition_id, provider, external_id)`；无稳定 ID 时使用 `(edition_id, normalized_company_name, booth_or_category, normalized_source_url)` 指纹。展会参展产生 `export_exhibition_participation` Evidence，但目的国 Evidence 必须来自明确页面或其他可靠来源。
+
+零资源冷启动先维护 `trade_show_candidates`（或进入审核队列），记录候选来源、官网候选、行业、日期和验证状态。只有验证了官方身份、出口属性、参展商入口与合规方式后才晋升为启用 `TradeShow`。`ExhibitorDiscoveryProvider` 需要支持四种 adapter：授权 API、结构化文件、PDF/电子会刊解析、官方目录分页；另提供管理员 CSV 导入作为可审计兜底。搜索引擎只负责发现候选入口，不替代官方参展证据。
+
 #### B. 官网/公开网络查询模板
 
 先寻找“有出口事实的企业”，再用目的国增强排序：
@@ -378,6 +398,8 @@ plan_acquisition
 
 Celery 每阶段接收 ID 列表而非整份网页正文。业务权威状态保存在 MySQL；Redis 只用于队列、限流和短期锁。任务至少一次投递下必须幂等，按 `provider + external_id/source_url + payload_hash` 防止重复处理。
 
+展会同步使用独立任务链 `discover_edition → sync_exhibitor_batch → resolve_exhibitors → enrich_missing_companies → recompute_matches`，不绑定某个产品。`AcquisitionRun` 只消费已同步结果；需要补同步时创建可关联但独立运行的 edition sync job，避免同一届被多个产品并发重复抓取。
+
 ### 6.10 来源链路持久化与官网确认
 
 Provider 返回 `DiscoveryHit` 后，系统先写 `ProviderRecord` 和首个 `DiscoveryRecord`，再做页面分类与实体解析。发现页指向目录详情、目录详情再指向官网时，每次跳转新增记录并通过 `referrer_record_id` 相连。最终由域名、企业名称、地址、电话等确定性信号确认官网归属，并把整条链路关联到规范 Prospect。
@@ -423,6 +445,10 @@ Provider 返回 `DiscoveryHit` 后，系统先写 `ProviderRecord` 和首个 `Di
 | GET | `/prospects` | 企业库搜索 |
 | GET | `/prospects/{id}` | 主档、角色、Evidence、联系人、匹配产品 |
 | GET | `/prospects/{id}/discovery-records` | 首次及历次发现、官网定位和合并链路 |
+| GET/POST | `/admin/trade-shows` | 展会目录查询与后台维护 |
+| GET/POST | `/admin/trade-shows/{id}/editions` | 届次查询、配置与目录版本 |
+| POST | `/admin/trade-show-editions/{id}/sync` | 幂等启动新届/更新/续跑同步 |
+| GET | `/admin/trade-show-editions/{id}/funnel` | 届次同步状态、覆盖范围与产出漏斗 |
 | POST | `/contact-activities` | 记录 6 类结果与跟进 |
 | GET | `/prospects/{id}/activities?product_id=&customer_type=` | 产品语境联系历史 |
 | POST | `/outreach/emails` | 向指定 ContactPoint 发邮件并关联语境 |

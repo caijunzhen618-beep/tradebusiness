@@ -9,6 +9,7 @@ V1 采用多来源拼装，不寻找万能数据源。系统同时遵循两个�
 
 1. **一次发现，尽量完整富化。** 为某个产品发现企业时，已公开可获得的其他市场、业务、产品、联系方式等有复用价值的事实也一起保存。
 2. **先复用企业库，再外部搜索。** 用户为某产品补充潜客时，先从已有企业事实库寻找匹配候选，不足时才启动新的互联网/外部数据发现。
+3. **展会按届次沉淀，不随产品临时重找。** 展会目录是系统级资产，新届次增量同步；不同物流产品复用已采集参展企业。
 
 ## 2. 数据源能力矩阵
 
@@ -122,6 +123,10 @@ Prospect、Contact、ContactPoint、企业级 Evidence 全局复用。一个企�
 - 企业官网 Provider：Company Enrichment + Contact Enrichment
 - 电话数据 Provider：Contact Enrichment
 - 贸易数据 Provider：Export Evidence + Destination Market Evidence
+
+展会 Provider 分为两种职责：`TradeShowCatalogProvider` 只用于管理员维护/验证展会及届次；`ExhibitorDiscoveryProvider` 只同步指定届次的参展商。产品补客任务可以消费已有参展企业，但不得临时运行全网展会发现。
+
+系统没有初始展会资源时，先从商务部/贸促会/行业协会/场馆日历生成候选，再以展会官网确认；参展商数据按官方 API/授权导出、官方 Excel/CSV/PDF/电子名录、允许访问的官方展商页、合法 CSV 导入的顺序接入。找不到稳定参展商入口的展会不得进入 P0 生产来源。
 
 ## 9. 发现来源链路、事实证据与原始记录分层
 
