@@ -26,7 +26,7 @@ V0 的工程底座可复用，获客领域中心模型不可直接复用。V0 �
 | `website_crawler_service.py` | 改造复用 | 抓取/提取可封装为官网 Provider；增加限流、来源、完整富化、幂等和合规边界 |
 | `ai_provider_service.py` | 改造复用 | AI 只能做提取/候选判断，输出需 schema 校验和 Evidence 来源，不能做黑盒最终分数 |
 | `sales_copy_service.py`、SalesCopy | 改造复用（后置） | 邮件文案能力可用于触达；非 V1 首批核心，且渠道收敛为 phone/email |
-| `FollowupTask` 与自动发送 API | 废弃自动跟进语义 | V1 是可选下次跟进，不要求自动代发；迁移有效 due_at/note 到 ContactActivity 派生提醒 |
+| `FollowupTask` 与自动发送 API | 废弃自动跟进语义 | V1 是可选下次跟进，不要求自动代发；由 ContactActivity 派生提醒 |
 | `sales_agent` 模型/API/页面 | 废弃（V1 范围） | 销售智能体、知识文档、prompt 模板不在确认的最小闭环；V0 保留 |
 | `scraping_task.py`、Scraping API | 废弃面向用户模型，改造执行骨架 | 用户不配置 scraper/关键词/国家；内部任务改为 AcquisitionRun/Batch |
 | `scraped_lead.py`、审核/导入 Service/API | 改造复用概念，废弃表语义 | 原始记录、审核、重复检测有价值；替换为 provider_records + resolution queue，不再导入 Customer |
@@ -46,14 +46,14 @@ V0 的工程底座可复用，获客领域中心模型不可直接复用。V0 �
 | --- | --- | --- |
 | `users` | 直接复用 | 保持 ID；补 owner/tenant 策略 |
 | `customers` | 废弃为 V1 主档 | 只读保留；经清洗去重后映射到 prospects，不能直接改名 |
-| `lead_search_tasks` | 废弃 | 仅迁移有审计价值的任务记录，不作为产品/补客计划 |
-| `leads` | 废弃为 V1 主档 | 清洗后合并到 prospects；丢弃永久 match_score，DNC 按证据迁移 |
-| `lead_contacts` | 改造迁移 | 拆成 contacts/contact_points；email/phone 分行并保留来源 |
-| `company_research_reports` | 改造迁移 | raw_sources 拆 Evidence；无法追溯的总结只作历史附件，不作准入依据 |
+| `lead_search_tasks` | 废弃 | 不作为产品或补客计划；无生产数据需要迁移 |
+| `leads` | 废弃为 V1 主档 | 不复用永久 match_score、全局状态和 task 私有企业模型 |
+| `lead_contacts` | 废弃表结构，参考字段 | V1 全新实现 contacts/contact_points；email/phone 分行并保留来源 |
+| `company_research_reports` | 改造复用提取思路 | V1 将可追溯结果拆为 Evidence，不复用报告表 |
 | `sales_copies` | 改造复用 | 可保留历史草稿；未来关联 Prospect/Activity |
-| `followup_tasks` | 改造迁移 | 转为 ContactActivity 的 next_follow_up_at 或历史待办；不直接复用业务表 |
+| `followup_tasks` | 废弃 V1 语义 | V1 使用 ContactActivity.next_follow_up_at；无历史数据迁移 |
 | `scraping_tasks` | 废弃 | V1 用 acquisition_runs/batches；V0 只读保留 |
-| `scraped_leads` | 废弃/迁移来源 | raw_data/source_url 可导入 provider_records；合格企业再 upsert Prospect |
+| `scraped_leads` | 废弃表语义 | Provider 新结果写入 provider_records；不迁移未上线样例数据 |
 | `emails` | 改造复用 | 保留发送基础；增加 Prospect/ContactPoint/产品语境关联或桥接表 |
 | `email_templates` | 直接复用 | 模板能力独立 |
 | `tasks` | 直接复用通用待办 | 不作为 ContactActivity 的替代 |
@@ -123,10 +123,6 @@ V1 新任务：`start_acquisition_run`、`consume_library_matches`、`discover_b
 | 邮件、任务、统计 | 改造复用 | 数据源切换到 V1 关联与指标 |
 | 销售智能体/话术模板 | 废弃（V1 范围） | V0 保留 |
 
-## 7. 迁移原则
+## 7. V0 保留边界
 
-1. 只新增 V1 表和适配 API，V0 表/接口继续运行。
-2. 先 dry-run：抽取 customers/leads/scraped_leads，标准化、去重并生成冲突报告。
-3. 可追溯字段写入 Prospect/Evidence/ContactPoint；无法证明来源的旧 `match_score` 不迁移。
-4. 全局 `Lead.do_not_contact` 只有存在明确证据时迁为企业全局 suppression，否则进入人工确认，不能猜测为产品级。
-5. 双写只用于短切换窗口并带对账；读取逐模块切换；回滚切回 V0 读取，不删除 V1 或 V0 数据。
+产品尚未上线，不设计 V0→V1 数据迁移、双写、兼容读取或数据回滚。V1 新模型、新 API 和新页面独立建设；V0 代码继续保留在仓库，不删除、不进入 V1 运行链路。复用评估的目的仅是判断哪些工程代码值得拿来用，不是为旧数据建立兼容包袱。

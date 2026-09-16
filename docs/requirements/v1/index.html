@@ -6,7 +6,7 @@
 <section class="card" id="company"><h2>02 Prospect / Contact / ContactPoint / Evidence</h2><p><strong>Prospect 是企业，全系统唯一且可多角色。</strong>同一家供应链企业可以同时是 freight_forwarder 和 exporter，企业主档与联系方式只保存一份。</p><pre>Prospect ──&lt; company_types
    ├──&lt; Contact ──&lt; ContactPoint (mobile / phone / email)
    └──&lt; Evidence (企业级优先，保留来源与时间)</pre><p>公司总机和通用邮箱可作为企业级 ContactPoint。格式校验与业务反馈分离；“联系方式无效”只标记本次使用的 ContactPoint，不判死企业。</p><p>Evidence 保存客观事实。为委内瑞拉发现企业时，如果官网同时披露 Venezuela、Korea、Japan，三项事实全部保存。</p></section>
-<section class="card" id="discovery"><h2>03 国内同行与出口货主发现</h2><h3>同行货代</h3><p>全国发现；基础国际货代搜索与目的国/运输方式相关搜索同时执行。目的国不是硬过滤。排序重视“有货源能力 + 资源互补”；相邻区域正向，同线路一手庄家等强供给信号降序但不删除。</p><h3>出口货主</h3><p>从国际 B2B 中国供应商、出口型展会、官网等天然有出口事实/意图的来源开始。出口证据与可触达方式同时满足才准入。真实目的国出口、目的国市场、目的区域、有数据依据的品类关系依次增强排序；贸易/海关数据不是 MVP 前置。</p></section>
+<section class="card" id="discovery"><h2>03 国内同行与出口货主发现</h2><h3>同行货代</h3><p>全国发现；基础国际货代搜索与目的国/运输方式相关搜索同时执行。V1-03 已细化首版城市分层、基础/运输/国家/区域/排除词库、Query 组合、企业识别、角色资格、官网富化、联系方式补全、去重、推荐档位、批次预算、停止条件和 VE/KR 验收案例。目的国不是硬过滤；排序重视“有货源能力 + 资源互补”，同线路庄家降序但不删除。</p><p><a href="03-domestic-forwarder-discovery.md">查看 V1-03 同行发现直接执行版</a></p><h3>出口货主</h3><p>从国际 B2B 中国供应商、出口型展会、官网等天然有出口事实/意图的来源开始。出口证据与可触达方式同时满足才准入。真实目的国出口、目的国市场、目的区域、有数据依据的品类关系依次增强排序；贸易/海关数据不是 MVP 前置。</p></section>
 <section class="card" id="matching"><h2>04 Product Matching、ProductProspect 与跨产品复用</h2><p>准入和排序分离，不向用户展示永久 0～100 黑盒分；展示“为什么推荐”并可查看 Evidence 来源。</p><pre>一份全局企业事实库
     ├── Product Matching：可重算候选与理由
     └── ProductProspect：产品 × 企业 × 客户角色的实际工作集</pre><p>补充顺序：① 强/中相关新匹配候选；② 企业库其他合格候选；③ 仍不足才外部增量发现。产品池已满时，新优质企业留作候选，不自动替换当前名单。</p><p><strong>委内瑞拉 / 韩国复用：</strong>韩国产品发现 D 企业，同时取得 KR + VE 事实后，D 成为两个产品的匹配候选；韩国产品可按当前任务入池，委内瑞拉不自动入池，下次补充时优先消费。</p></section>

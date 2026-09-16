@@ -121,32 +121,254 @@ LogisticsProduct ──< ProductInventoryTarget
 
 `product_matches` 是可重建投影。新增企业或关键 Evidence 后发出 `prospect.fact_changed`，异步重算所有启用产品；只产生候选，不自动加入已满产品池。
 
-## 6. Provider 与异步流水线
+## 6. 潜客发现具体实现方案
 
-### 6.1 接口
+潜客发现不实现为“给 AI 一句话，让 AI 自己搜索”。它由可记录、可重放、可评估的 `SearchPlan` 驱动。一个计划只服务一次 `产品 × 客户角色 × 库存缺口`，但发现的企业事实写入全局企业库。
+
+### 6.1 发现对象与中间数据
+
+```text
+SearchPlan
+- product_id / customer_type / gap
+- strategy_version
+- query_groups[]
+- source_groups[]
+- candidate_budget / stop_policy
+
+SearchQuery
+- query_text
+- query_group       base / destination / region / source_site
+- city? / page_cursor?
+- priority / status
+
+DiscoveryHit
+- query_id / provider / title / snippet / url / rank
+
+CompanySeed
+- candidate_name / website / source_url
+- possible_role / location
+- raw_evidence[]
+```
+
+`DiscoveryHit` 是网页结果，不是潜客。只有经过企业识别后才生成/合并 Prospect；只有满足角色准入并获得有效 ContactPoint 后才进入可用产品池。
+
+### 6.2 总体补客算法
+
+```text
+计算待开发缺口
+  ↓
+消费企业库强/中匹配候选
+  ↓ 仍有缺口
+消费企业库其他合格候选
+  ↓ 仍有缺口
+生成 SearchPlan
+  ↓
+按优先级执行一小批 Query / Source
+  ↓
+网页结果 → 企业识别 → 去重 → 资格判断
+  ↓
+官网完整富化 → Evidence → 联系方式发现与校验
+  ↓
+全局企业库 Upsert → 全产品重新匹配 → 当前池入池
+  ↓
+重新计算缺口和本批产出率，决定下一批或停止
+```
+
+不是先一次性生成数千条搜索任务。每批完成后用真实漏斗决定下一批规模，避免库存已经补足后仍继续付费搜索和抓取。
+
+### 6.3 国内同行货代搜索设计
+
+同行同时执行“基础覆盖”和“产品相关”两组搜索。
+
+#### A. 基础覆盖组
+
+业务词：
+
+```text
+国际货运代理 | 国际货代 | 国际物流 | 国际海运 | 海运货代
+freight forwarder | international logistics | shipping agent
+```
+
+城市由系统分批展开，不让用户选择。首批城市建议按货代密度配置，例如深圳、广州、上海、宁波、义乌、厦门、青岛、天津；后续城市是系统维护的 Search Strategy 数据，不写死在业务代码。
+
+示例：
+
+```text
+深圳 国际货运代理 公司
+广州 国际海运 货代 联系方式
+宁波 freight forwarder
+上海 international logistics company
+```
+
+#### B. 产品相关组
+
+从 `destination_country + transport_mode` 生成目的国中文名、英文名、所属区域和运输方式同义词。
+
+委内瑞拉海运示例：
+
+```text
+委内瑞拉 海运 货代
+Venezuela freight forwarder China
+拉美 海运 货代
+南美 国际物流 公司
+委内瑞拉 专线 国际货运代理
+```
+
+韩国海运示例：
+
+```text
+韩国 海运 货代
+Korea freight forwarder China
+中韩 国际物流
+韩国 专线 国际货运代理
+东亚 海运 货代
+```
+
+#### C. 排除与保留
+
+查询级排除词用于减少明显噪声，例如招聘、司机、搬家、同城配送、物流园、培训、快递网点；结果级分类再次排除纯国内物流、媒体文章、招聘页、聚合列表页。排除词不能过滤“同线路庄家”，后者仍是货代企业，只在匹配排序中降级。
+
+#### D. 同行资格识别
+
+页面或官网至少出现一类国际货运事实：国际货代/国际物流、海运/空运/跨境运输、NVOCC/订舱/报关等。仅出现“物流”而无国际业务证据时保持后台候选，不进入可用池。之后必须找到一个通过基础校验的电话、手机或 Email。
+
+### 6.4 国内出口货主搜索设计
+
+出口货主不使用“城市 + 工厂”全国盲搜，SearchPlan 按来源建立候选池。
+
+#### A. P0 来源组
+
+| 来源 | Discovery 方法 | 主要准入 Evidence | 联系方式路径 |
+| --- | --- | --- | --- |
+| 国际 B2B 中国供应商 | 合法 API、授权数据或可访问的公开供应商页 | `international_b2b`、供应商国家=中国、产品 | 供应商页 → 官网 → Contact 页 |
+| 出口型展会 | 官方/授权参展商目录，按届次和行业遍历 | `export_exhibition`、展会名称与届次 | 参展商页 → 官网 → Contact 页 |
+| 企业官网/公开网络 | 搜索引擎的来源限定和主题搜索 | export/global/overseas market 等 | 官网 contact/about/team 页面 |
+
+具体网站名称和采购方式在 Provider 技术验证时选择，但输入、输出和漏斗口径保持一致，避免供应商更换导致业务层重写。
+
+#### B. 官网/公开网络查询模板
+
+先寻找“有出口事实的企业”，再用目的国增强排序：
+
+```text
+中国 supplier "global market" 联系方式
+中国 manufacturer "overseas market"
+site:.cn "export department" manufacturer
+site:.cn "international sales" 产品
+```
+
+委内瑞拉增强查询：
+
+```text
+中国 supplier Venezuela
+manufacturer "Venezuela market" China
+出口 委内瑞拉 企业 联系方式
+中国供应商 拉美 市场
+```
+
+韩国增强查询：
+
+```text
+中国 supplier Korea
+manufacturer "Korea market" China
+出口 韩国 企业 联系方式
+中国供应商 韩国 经销商
+```
+
+目的国查询只用于优先发现和排序。没有公开 Venezuela/Korea 信息、但出口证据充分且可触达的企业仍可进入普通出口货主候选。
+
+#### C. 出口资格识别
+
+强证据直接确认 exporter 角色：国际 B2B 中国供应商、出口型展会参展商、可靠贸易记录、官网明确 export/global market。明显经营信号需要至少一项来源清晰的事实，例如 International Sales 部门、海外经销网络、多语言海外营销站或 export@ 邮箱。英文公司名、外贸城市、产品“看起来适合出口”等弱信号不能单独准入。
+
+### 6.5 Query Generator 的实现
+
+Query Generator 使用受版本管理的词典和组合规则，不直接让大模型自由生成最终查询。
+
+```python
+def build_queries(product, customer_type, strategy):
+    destination = country_terms(product.destination_country)
+    regions = region_terms(product.destination_country)
+    modes = transport_terms(product.transport_mode)
+    if customer_type == "freight_forwarder":
+        return base_forwarder_queries(strategy.cities) + \
+               route_queries(destination, regions, modes)
+    return exporter_source_queries(strategy.export_sources) + \
+           exporter_market_queries(destination, regions)
+```
+
+大模型可用于从页面文本提取候选公司名、业务事实和市场国家，但所有结果必须通过结构化 Schema 校验并绑定原文片段和 source_url；不得让模型凭常识生成不存在的企业或出口事实。
+
+### 6.6 Discovery / Enrichment Provider
 
 ```python
 class DiscoveryProvider(Protocol):
-    async def discover(self, query: DiscoveryQuery, cursor: str | None) -> DiscoveryPage: ...
+    async def discover(self, query: SearchQuery, cursor: str | None) -> DiscoveryPage: ...
 
 class EnrichmentProvider(Protocol):
     capabilities: set[Capability]
     async def enrich(self, company: CompanySeed) -> EnrichmentResult: ...
 ```
 
-Capability 使用 `company_profile`、`export_evidence`、`market_evidence`、`contact` 等；Provider 只声明能力，不决定最终准入。
+第一阶段至少拆为：
 
-### 6.2 补客工作流
+- `WebSearchDiscoveryProvider`：返回搜索结果标题、摘要、URL、排名，不直接写 Prospect；
+- `B2BSupplierDiscoveryProvider`：返回中国供应商候选和出口 Evidence；
+- `ExhibitorDiscoveryProvider`：按展会/届次遍历参展企业；
+- `WebsiteEnrichmentProvider`：抓取首页及高价值内页，提取企业、市场、产品、业务和联系方式；
+- `ContactEnrichmentProvider`：当官网联系方式不足时才调用额外补全服务。
 
-1. 原子创建 `acquisition_run`，同一产品/角色只允许一个 active run。
-2. 重算库存缺口；若为 0 直接 `no_gap` 停止。
-3. 从 `product_matches` 消费未入池的强/中相关且合格候选。
-4. 再消费企业库其他合格、未入池候选。
-5. 缺口仍存在才生成货代领域 Search Strategy，分批调用 Discovery。
-6. 每批依次执行实体解析、资格判断、完整富化、联系人补全、确定性校验、全局 upsert、全产品匹配。
-7. 当前产品按排序和剩余缺口写入 `product_prospects`；达到目标或搜索空间耗尽停止。
+官网抓取优先队列：主页 → Contact/联系我们 → About/关于我们 → Products/业务 → Market/Global/Export → Team。限制同域页数和正文大小，robots/条款禁止时不抓取。
 
-Celery Canvas 可按 run 编排小批任务；每个阶段以数据库状态为准，任务至少一次投递下必须幂等。重试采用指数退避 + 抖动；Provider 级限流、熔断与配额；失败批次进入可人工重试状态。不要在 Celery result backend 保存业务权威状态。
+### 6.7 联系方式发现
+
+联系方式按成本从低到高补全：
+
+1. Discovery 来源页已公开的电话/邮箱；
+2. 官网首页、页头页尾和 Contact 页面；
+3. About/Team 页面中的具体联系人；
+4. 合法的联系人补全 Provider。
+
+页面提取同时记录联系人附近文本，用于判断姓名和职位；无法建立归属的电话/邮箱保存为企业级 ContactPoint。邮箱/电话通过基础格式和占位值校验后才能计算为可用潜客。
+
+### 6.8 批次规模、产出估算与停止条件
+
+系统用历史漏斗估算为补足缺口需要发现多少候选：
+
+```text
+预计候选量 = 剩余缺口 ÷ 最近可用潜客产出率 × 安全系数
+```
+
+例如出口货主缺口 100，最近 500 个候选最终产出 50 个可用潜客，产出率 10%，安全系数 1.2，则计划最多处理约 1,200 个新候选，但仍以 50～100 个候选为一批动态执行，不一次性全部搜索。
+
+停止条件满足任一即可：
+
+- 待开发库存达到目标；
+- 本轮配置的候选预算或 Provider 配额耗尽；
+- 所有 Query/source cursor 已耗尽；
+- 连续 N 批（建议默认 3，可配置）没有新增可用潜客；
+- 单个可用潜客成本超过配置上限；
+- 用户取消；
+- Provider 持续失败并触发熔断。
+
+停止原因写入 `acquisition_run.stop_reason`，向用户返回“本次新增多少、仍缺多少、为何停止”，绝不降低准入标准凑数。
+
+### 6.9 异步任务拆分
+
+```text
+plan_acquisition
+  → execute_discovery_batch
+  → resolve_company_seeds
+  → qualify_company_batch
+  → enrich_company_batch
+  → enrich_contact_batch
+  → validate_and_upsert
+  → recompute_matches
+  → admit_current_product_pool
+  → evaluate_next_batch_or_finish
+```
+
+Celery 每阶段接收 ID 列表而非整份网页正文。业务权威状态保存在 MySQL；Redis 只用于队列、限流和短期锁。任务至少一次投递下必须幂等，按 `provider + external_id/source_url + payload_hash` 防止重复处理。
 
 ## 7. 数据质量与实体解析
 
@@ -202,8 +424,8 @@ Celery Canvas 可按 run 编排小批任务；每个阶段以数据库状态为�
 - 集成：Provider contract、实体合并、全流水线断点重试、邮件与 ContactActivity 关联。
 - 端到端：创建产品→设定双角色库存→补客→列表/详情→电话/邮件→6 类结果→跟进。
 - 必测复用：韩国发现企业同时写入 KR/VE Evidence；韩国产品可入池；委内瑞拉只生成新候选；下次补充时优先消费；不重复抓取、不复制 Prospect。
-- 迁移演练使用生产数据副本并输出对账报告；V0 表只读保留，回滚不删除 V0 数据。
+- 发现验收使用固定样本集和小批真实搜索，分别核对企业真实性、角色准入、Evidence 来源、联系方式有效率和跨产品复用结果。
 
 ## 11. 待技术评审决策点
 
-业务规则不重开讨论，仅需确认实现选择：MySQL 当前版本与迁移工具（建议 Alembic）、租户边界、首批合法数据 Provider、补客批大小与配额、SSE 或短轮询、V0 数据迁移的质量阈值。确认这些项目后才进入正式 V1 业务代码开发。
+业务规则不重开讨论，仅需确认实现选择：MySQL 当前版本与数据库版本管理工具（建议 Alembic）、租户边界、首批合法 Discovery/Enrichment Provider、首批城市与来源清单、补客批大小/成本上限/停止阈值，以及任务进度采用 SSE 还是短轮询。确认这些项目后才进入正式 V1 业务代码开发。
