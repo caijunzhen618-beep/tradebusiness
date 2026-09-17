@@ -89,6 +89,7 @@ V1 先使用模块化单体，而非微服务。原因是当前团队需要快�
 | `trade_shows` | 中英文名/别名、官网、主办方、行业/品类、城市、出口属性来源、目录配置、合规策略、status、reviewed_at | 系统级展会目录 |
 | `trade_show_editions` | trade_show、edition/year/season、日期、directory_url、published_at、source_version、sync_status/cursor、last_synced_at；unique(show, edition) | 可增量同步的具体届次 |
 | `exhibitor_records` | edition、provider、external_id?、company_name、booth、category、website?、source_url、payload_hash、prospect_id?、resolution_status；届次内幂等约束 | 届次参展企业原始记录 |
+| `demand_signals` | provider、source_url、title/summary、published_at、country/region、transport_mode、cargo/category、signal_type、expires_at、prospect_id?、resolution_status | 论坛/询价等时效性需求线索，不等于 Prospect |
 | `discovery_records` | run、batch、product、role、provider、source_type、query_text/group、city、rank、source_url、referrer_id、prospect_id?、resolution_status/reason、discovered_at | 企业发现与官网定位链路；去重后仍保留 |
 | `provider_records` | provider、external_id、source_url、payload_hash、raw_payload/retained_metadata、fetched_at；unique(provider, external_id/payload_hash) | 原始供应商记录、幂等与审计，不替代发现链路 |
 
@@ -345,6 +346,7 @@ class EnrichmentProvider(Protocol):
 - `ExhibitorDiscoveryProvider`：按展会/届次遍历参展企业；
 - `WebsiteEnrichmentProvider`：抓取首页及高价值内页，提取企业、市场、产品、业务和联系方式；
 - `ContactEnrichmentProvider`：当官网联系方式不足时才调用额外补全服务。
+- `ForumSignalProvider`：返回帖子及需求/广告/资讯分类候选，只产出 DemandSignal/CompanySeed，不直接写可用 Prospect。
 
 官网抓取优先队列：主页 → Contact/联系我们 → About/关于我们 → Products/业务 → Market/Global/Export → Team。限制同域页数和正文大小，robots/条款禁止时不抓取。
 
